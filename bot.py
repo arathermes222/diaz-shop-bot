@@ -84,7 +84,8 @@ async def check_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await query.edit_message_text("✅ عضویت تایید شد!")
+    # Delete old message and send welcome as new message
+    await query.message.delete()
     await send_welcome(update, context)
 
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,9 +105,9 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f" پشتیبانی: @{SUPPORT_USERNAME}"
     )
 
-    # Handle both callback query and message
+    # Always send as new message
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
