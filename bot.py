@@ -104,7 +104,11 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f" پشتیبانی: @{SUPPORT_USERNAME}"
     )
 
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    # Handle both callback query and message
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # --- Config Purchase Flow ---
 
@@ -408,10 +412,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+    keyboard = [
+        [InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
         "✅ رسید شما دریافت شد!\n"
         " خیلی زود سفارشت پیگیری و تحویل داده میشه 😉\n"
-        "━━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━",
+        reply_markup=reply_markup
     )
 
 # --- Admin Approve Flow ---
@@ -483,15 +493,21 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_configs(configs)
 
     # Send config to user
+    keyboard = [
+        [InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await context.bot.send_message(
         chat_id=user_id,
         text=(
             f"✅ **پرداخت شما تایید شد!**\n\n"
             f"📦 **پلن:** {plan_name}\n"
             f"🔗 **لینک کانفیگ:**\n`{config_link}`\n\n"
-            "━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━\n"
             "از خرید شما متشکریم! 🙏"
         ),
+        reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
@@ -517,8 +533,9 @@ async def reject_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ **رسید شما تایید نشد.**\n\n"
             " لطفاً با پشتیبانی تماس بگیرید.\n"
             f" 💬 @{SUPPORT_USERNAME}\n"
-            "━━━━━━━━━━━━━━━━"
+            "━━━━━━━━━━━━━━━━━"
         ),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]),
         parse_mode="Markdown"
     )
 
