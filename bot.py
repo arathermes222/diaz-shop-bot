@@ -199,12 +199,14 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         "📸 **لطفاً رسید پرداخت را ارسال کنید:**\n\n"
         " (عکس رسید را اینجا بفرستید)\n"
-        "━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━"
     )
 
     context.user_data["waiting_receipt"] = True
     context.user_data["receipt_plan"] = plan_id
     context.user_data["receipt_type"] = "config"
+
+    logger.info(f"User {query.from_user.id} is now waiting for receipt (config: {plan_id})")
 
 # --- ExpressVPN Purchase Flow ---
 
@@ -372,6 +374,8 @@ async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Handle Receipt ---
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Photo received from user {update.effective_user.id}, waiting_receipt={context.user_data.get('waiting_receipt')}")
+    
     if not context.user_data.get("waiting_receipt"):
         return
 
