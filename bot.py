@@ -37,6 +37,18 @@ logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
 
+PENDING_FILE = "pending_state.json"
+
+def load_pending():
+    if os.path.exists(PENDING_FILE):
+        with open(PENDING_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_pending(data):
+    with open(PENDING_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
 def load_configs():
     if os.path.exists(CONFIGS_FILE):
         with open(CONFIGS_FILE, "r") as f:
@@ -203,9 +215,14 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━"
     )
 
-    context.user_data["waiting_receipt"] = True
-    context.user_data["receipt_plan"] = plan_id
-    context.user_data["receipt_type"] = "config"
+    # Save state to file (survives bot restart)
+    pending = load_pending()
+    pending[str(query.from_user.id)] = {
+        "waiting_receipt": True,
+        "receipt_plan": plan_id,
+        "receipt_type": "config"
+    }
+    save_pending(pending)
 
     logger.info(f"User {query.from_user.id} is now waiting for receipt (config: {plan_id})")
 
@@ -310,12 +327,17 @@ async def receipt_express_received(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text(
         "📸 **لطفاً رسید پرداخت را ارسال کنید:**\n\n"
         " (عکس رسید را اینجا بفرستید)\n"
-        "━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━"
     )
 
-    context.user_data["waiting_receipt"] = True
-    context.user_data["receipt_plan"] = plan_id
-    context.user_data["receipt_type"] = "express"
+    # Save state to file (survives bot restart)
+    pending = load_pending()
+    pending[str(query.from_user.id)] = {
+        "waiting_receipt": True,
+        "receipt_plan": plan_id,
+        "receipt_type": "express"
+    }
+    save_pending(pending)
 
 # --- User Panel ---
 
@@ -375,14 +397,18 @@ async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Handle Receipt ---
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Photo received from user {update.effective_user.id}, waiting_receipt={context.user_data.get('waiting_receipt')}")
+    user_id = str(update.effective_user.id)
+    pending = load_pending()
+    user_state = pending.get(user_id, {})
     
-    if not context.user_data.get("waiting_receipt"):
+    logger.info(f"Photo received from user {user_id}, pending state: {user_state}")
+    
+    if not user_state.get("waiting_receipt"):
         return
 
     user = update.effective_user
-    plan_id = context.user_data.get("receipt_plan")
-    plan_type = context.user_data.get("receipt_type")
+    plan_id = user_state.get("receipt_plan")
+    plan_type = user_state.get("receipt_type")
 
     if plan_type == "config":
         plan = CONFIG_PLANS.get(plan_id)
@@ -392,7 +418,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not plan:
         return
 
-    context.user_data["waiting_receipt"] = False
+    # Clear pending state from file
+    pending = load_pending()
+    if user_id in pending:
+        del pending[user_id]
+        save_pending(pending)
 
     caption = (
         f"📸 **رسید جدید!**\n\n"
