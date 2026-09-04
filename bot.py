@@ -9,8 +9,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "@diazplaylist")  # Channel to check membership
-OWNER_ID = int(os.environ.get("OWNER_ID", "6326889425"))  # Amir's Telegram ID
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "@diazplaylist")
+OWNER_ID = int(os.environ.get("OWNER_ID", "6326889425"))
 SUPPORT_USERNAME = "MrArat"
 CARD_NUMBER = "6219861825198608"
 CARD_NAME = "امیرمحمد زارعی"
@@ -47,32 +47,19 @@ def save_configs(data):
     with open(CONFIGS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-def load_pending():
-    if os.path.exists("pending.json"):
-        with open("pending.json", "r") as f:
-            return json.load(f)
-    return {}
-
-def save_pending(data):
-    with open("pending.json", "w") as f:
-        json.dump(data, f, indent=2)
-
 async def is_member(chat_username: str, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if user is a member of the channel."""
     try:
         member = await context.bot.get_chat_member(chat_username, user_id)
         return member.status in ["member", "administrator", "creator"]
     except Exception as e:
         logger.error(f"Error checking membership: {e}")
-        return True  # If can't check, allow access
+        return True
 
 # --- Bot Commands ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    chat_id = update.effective_chat.id
-    
-    # Check channel membership
+
     if not await is_member(CHANNEL_ID, user.id, context):
         keyboard = [[InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{CHANNEL_ID.lstrip('@')}")],
                      [InlineKeyboardButton("✅ عضو شدم", callback_data="check_member")]]
@@ -83,20 +70,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
         return
-    
+
     await send_welcome(update, context)
 
 async def check_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     if not await is_member(CHANNEL_ID, query.from_user.id, context):
         await query.edit_message_text(
             "❌ هنوز عضو کانال نشدید!\n"
             "اول عضو شوید و دوباره دکمه «عضو شدم» را بزنید."
         )
         return
-    
+
     await query.edit_message_text("✅ عضویت تایید شد!")
     await send_welcome(update, context)
 
@@ -109,14 +96,14 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     text = (
         f"🎮 به ربات اختصاصی **Diaz Shop** خوش آمدید {user.first_name}!\n\n"
         " کانفیگ‌های ما زیر قیمت و تضمینی هستند! ✅\n\n"
         f" پشتیبانی: @{SUPPORT_USERNAME}\n"
         "━━━━━━━━━━━━━━━━"
     )
-    
+
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # --- Config Purchase Flow ---
@@ -124,7 +111,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buy_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     keyboard = [
         [InlineKeyboardButton("📦 ۱۰ گیگ - ۱۲,۰۰۰ تومان", callback_data="config_10gb")],
         [InlineKeyboardButton("📦 ۲۰ گیگ - ۳۰,۰۰۰ تومان", callback_data="config_20gb")],
@@ -133,7 +120,7 @@ async def buy_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         "📦 **انتخاب پلن کانفیگ:**\n\n"
         " همه پلن‌ها یک ماهه هستند.\n"
@@ -145,21 +132,18 @@ async def buy_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def select_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("config_", "")
     plan = CONFIG_PLANS.get(plan_id)
     if not plan:
         return
-    
-    context.user_data["selected_plan"] = plan_id
-    context.user_data["plan_type"] = "config"
-    
+
     keyboard = [
         [InlineKeyboardButton("💳 خرید", callback_data=f"pay_config_{plan_id}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="buy_config")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         f"📦 **پلن انتخابی:** {plan['name']}\n"
         f"💰 **قیمت:** {plan['price']} تومان\n"
@@ -173,19 +157,19 @@ async def select_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pay_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("pay_config_", "")
     plan = CONFIG_PLANS.get(plan_id)
     if not plan:
         return
-    
+
     keyboard = [
-        [InlineKeyboardButton("✅ رسید فرستادم", callback_data=f"receipt_{plan_id}")],
+        [InlineKeyboardButton("📸 ارسال رسید", callback_data=f"receipt_{plan_id}")],
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         f"💳 **اطلاعات پرداخت:**\n\n"
         f"💰 **مبلغ:** {plan['price']} تومان\n"
@@ -193,7 +177,7 @@ async def pay_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏦 **شماره کارت:**\n`{CARD_NUMBER}`\n"
         f"👤 **به نام:** {CARD_NAME}\n\n"
         "━━━━━━━━━━━━━━━━\n"
-        "💰 مبلغ را به شماره کارت above واریز کنید.\n"
+        "💰 مبلغ را به شماره کارت واریز کنید.\n"
         "📸 سپس رسید پرداخت را ارسال کنید.",
         reply_markup=reply_markup,
         parse_mode="Markdown"
@@ -202,18 +186,18 @@ async def pay_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("receipt_", "")
     plan = CONFIG_PLANS.get(plan_id)
     if not plan:
         return
-    
+
     await query.edit_message_text(
         "📸 **لطفاً رسید پرداخت را ارسال کنید:**\n\n"
         " (عکس رسید را اینجا بفرستید)\n"
         "━━━━━━━━━━━━━━━━"
     )
-    
+
     context.user_data["waiting_receipt"] = True
     context.user_data["receipt_plan"] = plan_id
     context.user_data["receipt_type"] = "config"
@@ -223,7 +207,7 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buy_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     text = (
         "🔐 **ExpressVPN**\n\n"
         " • اسپانسر رسمی جام جهانی ۲۰۲۶\n"
@@ -242,7 +226,7 @@ async def buy_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━\n"
         " **انتخاب پلن:**"
     )
-    
+
     keyboard = [
         [InlineKeyboardButton("⏰ ۱ ماهه - ۲۲۰,۰۰۰ تومان", callback_data="express_1m")],
         [InlineKeyboardButton("⏰ ۳ ماهه - ۳۳۰,۰۰۰ تومان", callback_data="express_3m")],
@@ -251,24 +235,24 @@ async def buy_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def select_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("express_", "")
     plan = EXPRESS_PLANS.get(plan_id)
     if not plan:
         return
-    
+
     keyboard = [
         [InlineKeyboardButton("💳 خرید", callback_data=f"pay_express_{plan_id}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="buy_express")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         f"🔐 **پلن انتخابی:** {plan['name']}\n"
         f"💰 **قیمت:** {plan['price']} تومان\n\n"
@@ -281,19 +265,19 @@ async def select_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pay_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("pay_express_", "")
     plan = EXPRESS_PLANS.get(plan_id)
     if not plan:
         return
-    
+
     keyboard = [
-        [InlineKeyboardButton("✅ رسید فرستادم", callback_data=f"receipt_express_{plan_id}")],
+        [InlineKeyboardButton("📸 ارسال رسید", callback_data=f"receipt_express_{plan_id}")],
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         f"💳 **اطلاعات پرداخت:**\n\n"
         f"💰 **مبلغ:** {plan['price']} تومان\n"
@@ -301,7 +285,7 @@ async def pay_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏦 **شماره کارت:**\n`{CARD_NUMBER}`\n"
         f"👤 **به نام:** {CARD_NAME}\n\n"
         "━━━━━━━━━━━━━━━━\n"
-        "💰 مبلغ را به شماره کارت above واریز کنید.\n"
+        "💰 مبلغ را به شماره کارت واریز کنید.\n"
         "📸 سپس رسید پرداخت را ارسال کنید.",
         reply_markup=reply_markup,
         parse_mode="Markdown"
@@ -310,18 +294,18 @@ async def pay_express(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receipt_express_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     plan_id = query.data.replace("receipt_express_", "")
     plan = EXPRESS_PLANS.get(plan_id)
     if not plan:
         return
-    
+
     await query.edit_message_text(
         "📸 **لطفاً رسید پرداخت را ارسال کنید:**\n\n"
         " (عکس رسید را اینجا بفرستید)\n"
         "━━━━━━━━━━━━━━━━"
     )
-    
+
     context.user_data["waiting_receipt"] = True
     context.user_data["receipt_plan"] = plan_id
     context.user_data["receipt_type"] = "express"
@@ -331,11 +315,11 @@ async def receipt_express_received(update: Update, context: ContextTypes.DEFAULT
 async def user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     user_id = str(query.from_user.id)
     configs = load_configs()
     user_configs = configs.get(user_id, [])
-    
+
     if not user_configs:
         text = (
             "👤 **پنل کاربری:**\n\n"
@@ -348,7 +332,7 @@ async def user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f" **{i}.** {cfg.get('type', 'کانفیگ')} - {cfg.get('data', '')}\n"
             text += f"    🔗 `{cfg.get('link', 'نامشخص')}`\n\n"
         text += "━━━━━━━━━━━━━━━━"
-    
+
     keyboard = [
         [InlineKeyboardButton("📦 خرید کانفیگ", callback_data="buy_config")],
         [InlineKeyboardButton("🔐 خرید ExpressVPN", callback_data="buy_express")],
@@ -356,13 +340,13 @@ async def user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     user = query.from_user
     keyboard = [
         [InlineKeyboardButton("📦 خرید کانفیگ", callback_data="buy_config")],
@@ -371,14 +355,14 @@ async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     text = (
         f"🎮 به ربات اختصاصی **Diaz Shop** خوش آمدید {user.first_name}!\n\n"
         " کانفیگ‌های ما زیر قیمت و تضمینی هستند! ✅\n\n"
         f" پشتیبانی: @{SUPPORT_USERNAME}\n"
         "━━━━━━━━━━━━━━━━"
     )
-    
+
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # --- Handle Receipt ---
@@ -386,22 +370,21 @@ async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("waiting_receipt"):
         return
-    
+
     user = update.effective_user
     plan_id = context.user_data.get("receipt_plan")
     plan_type = context.user_data.get("receipt_type")
-    
+
     if plan_type == "config":
         plan = CONFIG_PLANS.get(plan_id)
     else:
         plan = EXPRESS_PLANS.get(plan_id)
-    
+
     if not plan:
         return
-    
+
     context.user_data["waiting_receipt"] = False
-    
-    # Forward receipt to owner
+
     caption = (
         f"📸 **رسید جدید!**\n\n"
         f"👤 **کاربر:** {user.first_name} (@{user.username or 'ندارد'})\n"
@@ -410,13 +393,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 **مبلغ:** {plan['price']} تومان\n"
         f"📦 **نوع:** {'کانفیگ' if plan_type == 'config' else 'ExpressVPN'}"
     )
-    
+
     keyboard = [
-        [InlineKeyboardButton("✅ تایید", callback_data=f"approve_{plan_type}_{user.id}_{plan_id}")],
+        [InlineKeyboardButton("✅ تایید و ارسال کانفیگ", callback_data=f"approve_{plan_type}_{user.id}_{plan_id}")],
         [InlineKeyboardButton("❌ رد", callback_data=f"reject_{user.id}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await context.bot.send_photo(
         chat_id=OWNER_ID,
         photo=update.message.photo[-1].file_id,
@@ -424,69 +407,110 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
-    
-    # Notify user
+
     await update.message.reply_text(
         "✅ رسید شما دریافت شد!\n"
         " تا چند دقیقه بررسی و تایید می‌شود.\n"
         "━━━━━━━━━━━━━━━━"
     )
 
+# --- Admin Approve Flow ---
+
 async def approve_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     parts = query.data.split("_")
     plan_type = parts[1]
     user_id = int(parts[2])
     plan_id = parts[3]
-    
+
     if plan_type == "config":
         plan = CONFIG_PLANS.get(plan_id)
-        config_link = f"https://t.me/+CONFIG_LINK_{user_id}"  # Placeholder
     else:
         plan = EXPRESS_PLANS.get(plan_id)
-        config_link = f"https://t.me/+EXPRESS_LINK_{user_id}"  # Placeholder
-    
+
+    # Store pending approval info for admin
+    context.bot_data[f"pending_approve_{OWNER_ID}"] = {
+        "user_id": user_id,
+        "plan_type": plan_type,
+        "plan_id": plan_id,
+        "plan_name": plan["name"] if plan else plan_id,
+    }
+
+    await query.edit_message_caption(
+        caption=query.message.caption + "\n\n⏳ **در حال ارسال کانفیگ...**",
+        parse_mode="Markdown"
+    )
+
+    await context.bot.send_message(
+        chat_id=OWNER_ID,
+        text=(
+            f"📝 **لطفاً لینک کانفیگ/اشتراک رو بفرست:**\n\n"
+            f"👤 **کاربر:** {user_id}\n"
+            f"📦 **پلن:** {plan['name'] if plan else plan_id}\n\n"
+            "لینک رو تایپ کن و بفرست 👇"
+        ),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin text messages (config links)."""
+    if update.effective_user.id != OWNER_ID:
+        return
+
+    pending = context.bot_data.get(f"pending_approve_{OWNER_ID}")
+    if not pending:
+        return
+
+    config_link = update.message.text.strip()
+    user_id = pending["user_id"]
+    plan_type = pending["plan_type"]
+    plan_id = pending["plan_id"]
+    plan_name = pending["plan_name"]
+
     # Save config for user
     configs = load_configs()
     user_id_str = str(user_id)
     if user_id_str not in configs:
         configs[user_id_str] = []
-    
+
     configs[user_id_str].append({
         "type": "کانفیگ" if plan_type == "config" else "ExpressVPN",
-        "data": plan["name"] if plan else plan_id,
+        "data": plan_name,
         "link": config_link,
-        "date": str(query.message.date),
     })
     save_configs(configs)
-    
-    # Notify user
+
+    # Send config to user
     await context.bot.send_message(
         chat_id=user_id,
         text=(
             f"✅ **پرداخت شما تایید شد!**\n\n"
-            f"📦 **پلن:** {plan['name'] if plan else plan_id}\n"
-            f"🔗 **لینک کانفیگ:** `{config_link}`\n\n"
+            f"📦 **پلن:** {plan_name}\n"
+            f"🔗 **لینک کانفیگ:**\n`{config_link}`\n\n"
             "━━━━━━━━━━━━━━━━\n"
             "از خرید شما متشکریم! 🙏"
         ),
         parse_mode="Markdown"
     )
-    
-    # Update message
-    await query.edit_message_caption(
-        caption=query.message.caption + "\n\n✅ **تایید شد!**",
-        parse_mode="Markdown"
+
+    # Notify admin
+    await update.message.reply_text(
+        f"✅ **کانفیگ با موفقیت ارسال شد!**\n\n"
+        f"👤 کاربر: {user_id}\n"
+        f"📦 پلن: {plan_name}"
     )
+
+    # Clear pending
+    del context.bot_data[f"pending_approve_{OWNER_ID}"]
 
 async def reject_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     user_id = int(query.data.split("_")[1])
-    
+
     await context.bot.send_message(
         chat_id=user_id,
         text=(
@@ -497,7 +521,7 @@ async def reject_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
         parse_mode="Markdown"
     )
-    
+
     await query.edit_message_caption(
         caption=query.message.caption + "\n\n❌ **رد شد!**",
         parse_mode="Markdown"
@@ -509,12 +533,12 @@ def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set!")
         return
-    
+
     app = Application.builder().token(BOT_TOKEN).build()
-    
+
     # Command handlers
     app.add_handler(CommandHandler("start", start))
-    
+
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(check_member, pattern="^check_member$"))
     app.add_handler(CallbackQueryHandler(buy_config, pattern="^buy_config$"))
@@ -527,14 +551,17 @@ def main():
     app.add_handler(CallbackQueryHandler(back_main, pattern="^back_main$"))
     app.add_handler(CallbackQueryHandler(approve_receipt, pattern="^approve_"))
     app.add_handler(CallbackQueryHandler(reject_receipt, pattern="^reject_"))
-    
+
     # Handle receipts for config
     app.add_handler(CallbackQueryHandler(receipt_received, pattern="^receipt_(?!express_)"))
     app.add_handler(CallbackQueryHandler(receipt_express_received, pattern="^receipt_express_"))
-    
+
     # Photo handler for receipts
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
+
+    # Text handler for admin config links
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_text))
+
     logger.info("Diaz Shop Bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
