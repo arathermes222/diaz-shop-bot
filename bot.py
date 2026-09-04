@@ -53,7 +53,7 @@ async def is_member(chat_username: str, user_id: int, context: ContextTypes.DEFA
         return member.status in ["member", "administrator", "creator"]
     except Exception as e:
         logger.error(f"Error checking membership: {e}")
-        return True
+        return False
 
 # --- Bot Commands ---
 
@@ -98,10 +98,10 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        f"🎮 به ربات اختصاصی **Diaz Shop** خوش آمدید {user.first_name}!\n\n"
-        " کانفیگ‌های ما زیر قیمت و تضمینی هستند! ✅\n\n"
-        f" پشتیبانی: @{SUPPORT_USERNAME}\n"
-        "━━━━━━━━━━━━━━━━"
+        f"🎮 به ربات اختصاصی Diaz Shop خوش آمدید 🚀!\n\n"
+        " محصولات ما زیر قیمت و تضمینی هستند! ✅\n\n"
+        "━━━━━━━━━━━━━━━━━\n"
+        f" پشتیبانی: @{SUPPORT_USERNAME}"
     )
 
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
@@ -357,10 +357,10 @@ async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        f"🎮 به ربات اختصاصی **Diaz Shop** خوش آمدید {user.first_name}!\n\n"
-        " کانفیگ‌های ما زیر قیمت و تضمینی هستند! ✅\n\n"
-        f" پشتیبانی: @{SUPPORT_USERNAME}\n"
-        "━━━━━━━━━━━━━━━━"
+        f"🎮 به ربات اختصاصی Diaz Shop خوش آمدید 🚀!\n\n"
+        " محصولات ما زیر قیمت و تضمینی هستند! ✅\n\n"
+        "━━━━━━━━━━━━━━━━━\n"
+        f" پشتیبانی: @{SUPPORT_USERNAME}"
     )
 
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
@@ -410,8 +410,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "✅ رسید شما دریافت شد!\n"
-        " تا چند دقیقه بررسی و تایید می‌شود.\n"
-        "━━━━━━━━━━━━━━━━"
+        " خیلی زود سفارشت پیگیری و تحویل داده میشه 😉\n"
+        "━━━━━━━━━━━━━━━━━"
     )
 
 # --- Admin Approve Flow ---
