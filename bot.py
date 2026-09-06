@@ -97,7 +97,7 @@ class SpiderPanel:
             "expire_days": days,
             "protocol": "vless",
             "concurrent_connections": 1,
-            "inbound_ids": ["default-reverse", "default-tunnel", "default-worker"],
+            "inbound_ids": ["default-reality", "default"],
         }
         r = await self._retry_request("post", f"{self.base_url}/api/users", json=body)
         if r.status_code == 200:
@@ -573,10 +573,9 @@ async def user_panel(update, context):
     spider_users = []
     try:
         all_users = await spider.get_users()
-        # Filter: match by telegram user id in username or by label
         for u in all_users:
             uname = u.get("username", "")
-            if uid in uname or f"Diaz-{uid}" in uname:
+            if uname.startswith("diaz-"):
                 spider_users.append(u)
     except Exception as e:
         logger.error(f"Failed to get SpiderPanel users: {e}")
@@ -593,25 +592,23 @@ async def user_panel(update, context):
 
         for i, u in enumerate(spider_users, 1):
             uname = u.get("username", "")
+            user_id = u.get("user_id", "")
             used = u.get("traffic_used_bytes", 0)
             limit = u.get("traffic_limit_bytes", 0)
             expire_at = u.get("expire_at", "")
-            config_url = u.get("config_url", "")
-            status = u.get("status", "active")
 
-            # Format usage
+            # Format volume
             if limit > 0:
                 usage = f"{_bytes_to_human(used)} / {_bytes_to_human(limit)}"
             else:
-                usage = f"{_bytes_to_human(used)} / ∞"
+                usage = "∞"
 
             # Format expiry
             if expire_at:
                 try:
                     from datetime import datetime
                     exp = datetime.fromisoformat(expire_at)
-                    now = datetime.now()
-                    days_left = (exp - now).days
+                    days_left = (exp - datetime.now()).days
                     if days_left <= 0:
                         expiry = "⏰ منقضی شده"
                     else:
@@ -621,10 +618,21 @@ async def user_panel(update, context):
             else:
                 expiry = "∞"
 
+            # Get config link
+            config = ""
+            try:
+                cr = await spider.get_user_config(user_id)
+                config = cr if isinstance(cr, str) else ""
+            except:
+                pass
+
             text += f"**{i}.** `{uname}`\n"
             text += f"   📊 **حجم:** {usage}\n"
             text += f"   ⏰ **اعتبار:** {expiry}\n"
-            text += f"   🔗 `{config_url}`\n\n"
+            if config:
+                text += f"   🔗 **کانفیگ:**\n`{config}`\n\n"
+            else:
+                text += "\n"
 
         text += "━━━━━━━━━━━━━━━━━"
 
@@ -886,7 +894,7 @@ async def handle_text(update, context):
         # Create SpiderPanel user
         try:
             user_data = await spider.create_user(
-                username=f"Diaz-{uid}-{name}",
+                username=f"diaz-{name}",
                 limit_gb=plan_data.get("limit_gb", 0),
                 days=plan_data.get("days", 30),
             )
@@ -970,7 +978,7 @@ async def handle_text(update, context):
         # Create SpiderPanel user
         try:
             user_data = await spider.create_user(
-                username=f"Diaz-{uid}-{name}",
+                username=f"diaz-{name}",
                 limit_gb=plan_data.get("limit_gb", 0),
                 days=plan_data.get("days", 30),
             )
