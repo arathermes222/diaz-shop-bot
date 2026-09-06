@@ -3,7 +3,9 @@
 
 import os
 import json
+import time
 import logging
+import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -18,25 +20,153 @@ CONFIGS_FILE = "configs.json"
 PENDING_FILE = "pending_state.json"
 WALLET_FILE = "wallet.json"
 
+# SpiderPanel settings
+SPIDER_URL = os.environ.get("SPIDER_URL", "https://spiderpanel-production-2268.up.railway.app")
+SPIDER_PASSWORD = os.environ.get("SPIDER_PASSWORD", "Arat")
+
 CONFIG_PLANS = {
-    "10gb": {"name": "۱۰ گیگ", "price": "۱۲,۰۰۰", "data": "10GB", "duration": "۱ ماه", "price_int": 12000},
-    "20gb": {"name": "۲۰ گیگ", "price": "۳۰,۰۰۰", "data": "20GB", "duration": "۱ ماه", "price_int": 30000},
-    "50gb": {"name": "۵۰ گیگ", "price": "۷۰,۰۰۰", "data": "50GB", "duration": "۱ ماه", "price_int": 70000},
-    "80gb": {"name": "۸۰ گیگ", "price": "۱۱۰,۰۰۰", "data": "80GB", "duration": "۱ ماه", "price_int": 110000},
+    "10gb": {"name": "۱۰ گیگ", "price": "۱۲,۰۰۰", "data": "10GB", "duration": "۱ ماه", "price_int": 12000, "limit_gb": 10, "days": 30},
+    "20gb": {"name": "۲۰ گیگ", "price": "۳۰,۰۰۰", "data": "20GB", "duration": "۱ ماه", "price_int": 30000, "limit_gb": 20, "days": 30},
+    "50gb": {"name": "۵۰ گیگ", "price": "۷۰,۰۰۰", "data": "50GB", "duration": "۱ ماه", "price_int": 70000, "limit_gb": 50, "days": 30},
+    "80gb": {"name": "۸۰ گیگ", "price": "۱۱۰,۰۰۰", "data": "80GB", "duration": "۱ ماه", "price_int": 110000, "limit_gb": 80, "days": 30},
 }
 
 EXPRESS_PLANS = {
-    "1m": {"name": "۱ ماهه", "price": "۲۲۰,۰۰۰", "price_int": 220000},
-    "3m": {"name": "۳ ماهه", "price": "۳۳۰,۰۰۰", "price_int": 330000},
-    "6m": {"name": "۶ ماهه", "price": "۴۹۰,۰۰۰", "price_int": 490000},
-    "1y": {"name": "۱ ساله", "price": "۹۵۰,۰۰۰", "price_int": 950000},
+    "1m": {"name": "۱ ماهه", "price": "۲۲۰,۰۰۰", "price_int": 220000, "limit_gb": 0, "days": 30},
+    "3m": {"name": "۳ ماهه", "price": "۳۳۰,۰۰۰", "price_int": 330000, "limit_gb": 0, "days": 90},
+    "6m": {"name": "۶ ماهه", "price": "۴۹۰,۰۰۰", "price_int": 490000, "limit_gb": 0, "days": 180},
+    "1y": {"name": "۱ ساله", "price": "۹۵۰,۰۰۰", "price_int": 950000, "limit_gb": 0, "days": 365},
 }
-
-# Amounts for quick wallet charge
-CHARGE_AMOUNTS = ["۵۰,۰۰۰", "۱۰۰,۰۰۰", "۲۰۰,۰۰۰", "۵۰۰,۰۰۰"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ─── SpiderPanel API ──────────────────────────────────────
+
+class SpiderPanel:
+    """Client for SpiderPanel API"""
+    def __init__(self, base_url, password):
+        self.base_url = base_url.rstrip("/")
+        self.password = password
+        self.session_token = None
+        self.client = httpx.AsyncClient(timeout=30, verify=False)
+
+    async def login(self):
+        """Login and get session cookie"""
+        try:
+            r = await self.client.post(f"{self.base_url}/api/login", json={"password": self.password})
+            if r.status_code == 200:
+                # Extract session cookie
+                for cookie in r.cookies.jar:
+                    if cookie.name == "spider_session":
+                        self.session_token = cookie.value
+                        logger.info("SpiderPanel login OK")
+                        return True
+                # Try any cookie
+                cookies = dict(r.cookies)
+                if cookies:
+                    self.session_token = list(cookies.values())[0]
+                    logger.info(f"SpiderPanel login OK (cookie: {list(cookies.keys())[0]})")
+                    return True
+            logger.error(f"SpiderPanel login failed: {r.status_code} {r.text[:200]}")
+            return False
+        except Exception as e:
+            logger.error(f"SpiderPanel login error: {e}")
+            return False
+
+    def _headers(self):
+        if self.session_token:
+            # Try cookie-based auth
+            return {}
+        return {}
+
+    def _cookies(self):
+        if self.session_token:
+            return {"spider_session": self.session_token}
+        return {}
+
+    async def _ensure_auth(self):
+        if not self.session_token:
+            await self.login()
+
+    async def create_link(self, label, limit_gb=0, days=30, protocol="vless"):
+        """Create a new config link"""
+        await self._ensure_auth()
+        try:
+            body = {
+                "label": label,
+                "limit_value": limit_gb,
+                "limit_unit": "GB",
+                "expires_days": days,
+                "protocol": protocol,
+            }
+            r = await self.client.post(
+                f"{self.base_url}/api/links",
+                json=body,
+                cookies=self._cookies(),
+            )
+            if r.status_code == 200:
+                data = r.json()
+                logger.info(f"SpiderPanel link created: {data.get('uuid', '?')}")
+                return data
+            elif r.status_code == 401:
+                # Re-login and retry
+                self.session_token = None
+                await self.login()
+                r = await self.client.post(
+                    f"{self.base_url}/api/links",
+                    json=body,
+                    cookies=self._cookies(),
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    logger.info(f"SpiderPanel link created (retry): {data.get('uuid', '?')}")
+                    return data
+            logger.error(f"SpiderPanel create_link failed: {r.status_code} {r.text[:200]}")
+            return None
+        except Exception as e:
+            logger.error(f"SpiderPanel create_link error: {e}")
+            return None
+
+    async def get_links(self):
+        """Get all links with usage info"""
+        await self._ensure_auth()
+        try:
+            r = await self.client.get(
+                f"{self.base_url}/api/links",
+                cookies=self._cookies(),
+            )
+            if r.status_code == 200:
+                return r.json().get("links", [])
+            elif r.status_code == 401:
+                self.session_token = None
+                await self.login()
+                r = await self.client.get(
+                    f"{self.base_url}/api/links",
+                    cookies=self._cookies(),
+                )
+                if r.status_code == 200:
+                    return r.json().get("links", [])
+            logger.error(f"SpiderPanel get_links failed: {r.status_code}")
+            return []
+        except Exception as e:
+            logger.error(f"SpiderPanel get_links error: {e}")
+            return []
+
+    async def get_link(self, uuid):
+        """Get single link info"""
+        links = await self.get_links()
+        for link in links:
+            if link.get("uuid") == uuid:
+                return link
+        return None
+
+    async def close(self):
+        await self.client.aclose()
+
+
+# Global spider client
+spider = SpiderPanel(SPIDER_URL, SPIDER_PASSWORD)
 
 # ─── File Helpers ─────────────────────────────────────────
 
@@ -64,12 +194,10 @@ def load_wallet(): return _load(WALLET_FILE)
 def save_wallet(d): _save(WALLET_FILE, d)
 
 def get_balance(user_id):
-    """Get wallet balance for a user"""
     wallet = load_wallet()
     return wallet.get(str(user_id), {}).get("balance", 0)
 
 def add_balance(user_id, amount):
-    """Add amount to user's wallet"""
     wallet = load_wallet()
     uid = str(user_id)
     if uid not in wallet:
@@ -79,7 +207,6 @@ def add_balance(user_id, amount):
     save_wallet(wallet)
 
 def spend_balance(user_id, amount):
-    """Spend from wallet. Returns True if successful"""
     wallet = load_wallet()
     uid = str(user_id)
     if uid not in wallet or wallet[uid]["balance"] < amount:
@@ -96,6 +223,16 @@ async def is_member(chat_username, user_id, context):
     except Exception as e:
         logger.error(f"Membership check error: {e}")
         return False
+
+def _bytes_to_human(n):
+    """Convert bytes to human readable"""
+    if n <= 0:
+        return "نامحدود"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if abs(n) < 1024.0:
+            return f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} PB"
 
 # ─── Main Menu ────────────────────────────────────────────
 
@@ -165,7 +302,6 @@ async def wallet_menu(update, context):
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
-    bal = get_balance(uid)
     kb = [
         [InlineKeyboardButton("💳 افزایش موجودی", callback_data="charge_wallet")],
         [InlineKeyboardButton("📊 تاریخچه تراکنش‌ها", callback_data="wallet_history")],
@@ -195,7 +331,6 @@ async def charge_custom(update, context):
     q = update.callback_query
     await q.answer()
     uid = str(q.from_user.id)
-    # Set state: waiting for custom amount
     pending = load_pending()
     pending[uid] = {"waiting": True, "type": "charge_custom"}
     save_pending(pending)
@@ -232,7 +367,6 @@ async def charge_amount(update, context):
 async def charge_receipt_step(update, context):
     q = update.callback_query
     await q.answer()
-    # Extract amount from callback_data: charge_receipt_XXXXX
     amount = int(q.data.replace("charge_receipt_", ""))
     uid = str(q.from_user.id)
     pending = load_pending()
@@ -258,7 +392,7 @@ async def wallet_history(update, context):
         text = "📊 **تاریخچه تراکنش‌ها:**\n\nهنوز تراکنشی ثبت نشده.\n\n━━━━━━━━━━━━━━━━━"
     else:
         text = f"📊 **تاریخچه تراکنش‌ها:**\n\n"
-        for h in history[-10:]:  # last 10
+        for h in history[-10:]:
             sign = "+" if h["amount"] > 0 else ""
             text += f"{'💳' if h['type'] == 'charge' else '📦'} {sign}{h['amount']:,} تومان\n"
         text += f"\n━━━━━━━━━━━━━━━━━\n💰 **موجودی فعلی:** {bal:,} تومان"
@@ -266,7 +400,7 @@ async def wallet_history(update, context):
     kb = [[InlineKeyboardButton("🔙 بازگشت", callback_data="wallet_menu")]]
     await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
-# ─── Config Purchase (with wallet option) ─────────────────
+# ─── Config Purchase ──────────────────────────────────────
 
 async def buy_config(update, context):
     q = update.callback_query
@@ -298,7 +432,7 @@ async def select_config(update, context):
         kb.append([InlineKeyboardButton(f"💰 پرداخت از کیف پول ({plan['price']})", callback_data=f"pay_wallet_config_{pid}")])
     kb.append([InlineKeyboardButton("💳 پرداخت با کارت", callback_data=f"pay_config_{pid}")])
     kb.append([InlineKeyboardButton("🔙 بازگشت", callback_data="buy_config")])
-    wallet_note = f"\n💰 موجودی کیف پول: {bal:,} تومان" if can_wallet else f"\n💰 موجودی کیف پول: {bal:,} تومان (ناف)"
+    wallet_note = f"\n💰 موجودی کیف پول: {bal:,} تومان" if can_wallet else f"\n💰 موجودی کیف پول: {bal:,} تومان (نافicient)"
     await q.edit_message_text(
         f"📦 **پلن انتخابی:** {plan['name']}\n💰 **قیمت:** {plan['price']} تومان\n⏰ **مدت:** {plan['duration']}{wallet_note}\n\n━━━━━━━━━━━━━━━━━\n روش پرداخت را انتخاب کنید.",
         reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
@@ -336,7 +470,7 @@ async def receipt_received(update, context):
     pending[uid] = {"waiting": True, "plan": pid, "type": "config"}
     save_pending(pending)
 
-# ─── Wallet Payment for Config ────────────────────────────
+# ─── Wallet Payment (auto-create config!) ─────────────────
 
 async def pay_wallet_config(update, context):
     q = update.callback_query
@@ -349,40 +483,71 @@ async def pay_wallet_config(update, context):
     price = plan["price_int"]
 
     if not spend_balance(uid, price):
-        await q.edit_message_text("❌ موجودی کیف پول کافی نیست!\n\n ابتدا کیف پول خود را شارژ کنید.",
+        await q.edit_message_text("❌ موجودی کیف پول کافی نیست!",
                                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 شارژ کیف پول", callback_data="charge_wallet")]]))
         return
 
-    # Save pending state for admin to send config
-    pending = load_pending()
-    pending[str(uid)] = {"waiting": True, "plan": pid, "type": "config_wallet", "amount": price}
-    save_pending(pending)
+    # Show loading
+    await q.edit_message_text("⏳ **در حال ساخت کانفیگ...**\n\nلطفاً صبر کنید...", parse_mode="Markdown")
 
-    kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
-    await q.edit_message_text(
-        f"✅ **پرداخت از کیف پول موفق!**\n\n"
-        f"📦 **پلن:** {plan['name']}\n"
-        f"💰 **مبلغ کسر شده:** {plan['price']} تومان\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"⏳ سفارش شما ثبت شد و به زودی کانفیگ برایتان ارسال می‌شود!",
-        reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
+    # Create config on SpiderPanel automatically!
+    label = f"Diaz-{uid}-{pid}"
+    link_data = await spider.create_link(
+        label=label,
+        limit_gb=plan.get("limit_gb", 0),
+        days=plan.get("days", 30),
+        protocol="vless",
     )
 
-    # Notify owner
-    await context.bot.send_message(
-        chat_id=OWNER_ID,
-        text=(
-            f"💰 **خرید از کیف پول!**\n\n"
-            f"👤 **کاربر:** {q.from_user.first_name} (@{q.from_user.username or 'ندارد'})\n"
-            f"🆔 **آیدی:** {uid}\n"
+    if link_data and link_data.get("vless_link"):
+        config_link = link_data["vless_link"]
+        uuid = link_data.get("uuid", "")
+
+        # Save config locally
+        configs = load_configs()
+        uid_str = str(uid)
+        if uid_str not in configs:
+            configs[uid_str] = []
+        configs[uid_str].append({
+            "type": "کانفیگ", "data": plan["name"],
+            "link": config_link, "spider_uuid": uuid,
+            "usage": "جدید", "expiry": plan["duration"],
+        })
+        save_configs(configs)
+
+        kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
+        await q.edit_message_text(
+            f"✅ **کانفیگ شما آماده است!**\n\n"
             f"📦 **پلن:** {plan['name']}\n"
-            f"💰 **مبلغ:** {plan['price']} تومان\n\n"
-            f"لطفاً کانفیگ را برای کاربر ارسال کنید."
-        ),
-        parse_mode="Markdown"
-    )
+            f"💰 **مبلغ کسر شده:** {plan['price']} تومان\n\n"
+            f"🔗 **لینک کانفیگ:**\n`{config_link}`\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"از خرید شما متشکریم! 🙏",
+            reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
+        )
+        logger.info(f"Auto config created for {uid}: {uuid}")
+    else:
+        # SpiderPanel failed, save pending for manual
+        pending = load_pending()
+        pending[str(uid)] = {"waiting": True, "plan": pid, "type": "config_wallet", "amount": price}
+        save_pending(pending)
 
-# ─── ExpressVPN Purchase ──────────────────────────────────
+        kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
+        await q.edit_message_text(
+            f"⏳ **سفارش شما ثبت شد!**\n\n"
+            f"📦 **پلن:** {plan['name']}\n"
+            f"💰 **مبلغ کسر شده:** {plan['price']} تومان\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ ساخت خودکار کانفیگ ممکن نبود.\n"
+            f"به زودی کانفیگ توسط پشتیبانی برایتان ارسال می‌شود!",
+            reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=OWNER_ID,
+            text=f"⚠️ **ساخت خودکار کانفیگ ناموفق!**\n\n👤 کاربر: {uid}\n📦 پلن: {plan['name']}\n\nلطفاً دستی کانفیگ بفرستید."
+        )
+
+# ─── Express Purchase ─────────────────────────────────────
 
 async def buy_express(update, context):
     q = update.callback_query
@@ -496,7 +661,7 @@ async def pay_wallet_express(update, context):
         parse_mode="Markdown"
     )
 
-# ─── User Panel ───────────────────────────────────────────
+# ─── User Panel (with live SpiderPanel data) ──────────────
 
 async def user_panel(update, context):
     q = update.callback_query
@@ -515,14 +680,44 @@ async def user_panel(update, context):
         )
     else:
         text = f"👤 **پنل کاربری:**\n\n💰 **کیف پول:** {bal:,} تومان\n\n"
+
+        # Try to get live data from SpiderPanel
+        spider_links = {}
+        try:
+            links = await spider.get_links()
+            for link in links:
+                spider_links[link.get("uuid", "")] = link
+        except Exception as e:
+            logger.error(f"Failed to get SpiderPanel links: {e}")
+
         for i, cfg in enumerate(user_configs, 1):
-            text += f"**{i}.** {cfg.get('type', 'کانفیگ')} - {cfg.get('data', '')}\n"
-            text += f"   📊 **حجم:** {cfg.get('usage', 'نامشخص')}\n"
-            text += f"   ⏰ **انقضا:** {cfg.get('expiry', 'نامشخص')}\n"
-            text += f"   🔗 `{cfg.get('link', 'نامشخص')}`\n\n"
+            cfg_type = cfg.get('type', 'کانفیگ')
+            cfg_data = cfg.get('data', '')
+            cfg_link = cfg.get('link', '')
+            spider_uuid = cfg.get('spider_uuid', '')
+
+            # Get live usage from SpiderPanel
+            if spider_uuid and spider_uuid in spider_links:
+                sp = spider_links[spider_uuid]
+                used = sp.get("used_bytes", 0)
+                limit = sp.get("limit_bytes", 0)
+                expired = sp.get("expired", False)
+                if expired:
+                    usage = "⏰ منقضی شده"
+                elif limit > 0:
+                    usage = f"{_bytes_to_human(used)} / {_bytes_to_human(limit)}"
+                else:
+                    usage = f"{_bytes_to_human(used)} / ∞"
+            else:
+                usage = cfg.get('usage', 'نامشخص')
+
+            text += f"**{i}.** {cfg_type} - {cfg_data}\n"
+            text += f"   📊 **حجم:** {usage}\n"
+            text += f"   🔗 `{cfg_link}`\n\n"
         text += "━━━━━━━━━━━━━━━━━"
 
     kb = [
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="user_panel")],
         [InlineKeyboardButton("📦 خرید کانفیگ", callback_data="buy_config")],
         [InlineKeyboardButton("🔐 خرید ExpressVPN", callback_data="buy_express")],
         [InlineKeyboardButton("💰 کیف پول", callback_data="wallet_menu")],
@@ -580,8 +775,6 @@ async def handle_photo(update, context):
 
     # ─── Custom amount charge ───
     if ptype == "charge_custom":
-        # Try to parse the photo caption or user's last message as amount
-        # For simplicity, ask user to type amount first
         del pending[uid]
         save_pending(pending)
         await update.message.reply_text("❌ لطفاً ابتدا مبلغ را به صورت عدد تایپ کنید.")
@@ -679,7 +872,6 @@ async def handle_admin_text(update, context):
         return
     pending = context.bot_data.get(f"pending_approve_{OWNER_ID}")
     if not pending:
-        # Check if admin is typing a custom charge amount
         return
 
     config_link = update.message.text.strip()
@@ -726,7 +918,6 @@ async def handle_text(update, context):
     pending = load_pending()
     state = pending.get(uid)
 
-    # Custom charge amount
     if state and state.get("type") == "charge_custom":
         try:
             amount = int(update.message.text.strip().replace(",", "").replace("،", ""))
@@ -736,7 +927,6 @@ async def handle_text(update, context):
             await update.message.reply_text("❌ لطفاً یک عدد صحیح وارد کنید.")
             return
 
-        # Show card info for this amount
         kb = [
             [InlineKeyboardButton("📸 ارسال رسید", callback_data=f"charge_receipt_{amount}")],
             [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -751,24 +941,35 @@ async def handle_text(update, context):
             f"📸 سپس رسید پرداخت را ارسال کنید.",
             reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
         )
-        # Keep state for receipt
         pending[uid]["amount"] = amount
         pending[uid]["type"] = "charge"
         save_pending(pending)
         return
 
-    # If admin is in approve mode, forward to admin handler
     if update.effective_user.id == OWNER_ID:
         await handle_admin_text(update, context)
 
 # ─── Main ─────────────────────────────────────────────────
+
+async def post_init(application):
+    """Login to SpiderPanel on startup"""
+    logger.info("Logging in to SpiderPanel...")
+    ok = await spider.login()
+    if ok:
+        logger.info("SpiderPanel connected! ✅")
+    else:
+        logger.warning("SpiderPanel login failed - auto-config will not work ⚠️")
+
+async def post_shutdown(application):
+    """Close SpiderPanel client"""
+    await spider.close()
 
 def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set!")
         return
     logger.info(f"Starting Diaz Shop Bot... OWNER_ID={OWNER_ID}")
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
 
     # Commands
     app.add_handler(CommandHandler("start", start))
