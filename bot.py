@@ -125,6 +125,7 @@ class SpiderPanel:
                 "username": data.get("username"),
                 "config": config,
                 "config_uuid": data.get("config_uuid", ""),
+                "subscription_uuid": data.get("subscription_uuid", ""),
                 "subscription_url": data.get("subscription_url", ""),
                 "traffic_limit_bytes": data.get("traffic_limit_bytes", 0),
                 "expire_at": data.get("expire_at", ""),
@@ -140,11 +141,24 @@ class SpiderPanel:
         return []
 
     async def get_user_config(self, user_id):
-        """Get config for a specific user"""
+        """Get single config for a specific user"""
         r = await self._retry_request("get", f"{self.base_url}/api/users/{user_id}/config")
         if r.status_code == 200:
             return r.json().get("config", "")
         return ""
+
+    async def get_user_all_configs(self, subscription_uuid):
+        """Get ALL configs via subscription endpoint (Reality + VLESS+WS + XHTTP)"""
+        import base64
+        r = await self._retry_request("get", f"{self.base_url}/subs/{subscription_uuid}")
+        if r.status_code == 200:
+            try:
+                decoded = base64.b64decode(r.text).decode()
+                configs = [c.strip() for c in decoded.strip().split("\n") if c.strip()]
+                return configs
+            except Exception as e:
+                logger.error(f"Failed to decode subscription configs: {e}")
+        return []
 
     async def close(self):
         await self.client.aclose()
@@ -906,23 +920,36 @@ async def handle_text(update, context):
                 days=plan_data.get("days", 30),
             )
 
-            if user_data and user_data.get("config"):
-                config_link = user_data["config"]
-                # Send config to user
+            if user_data and user_data.get("subscription_uuid"):
+                sub_uuid = user_data["subscription_uuid"]
+                # Get ALL configs from subscription endpoint
+                all_configs = await spider.get_user_all_configs(sub_uuid)
+                if not all_configs and user_data.get("config"):
+                    all_configs = [user_data["config"]]
+                # Send configs to user
                 kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
+                header = (
+                    f"✅ **کانفیگ شما آماده است!**\n\n"
+                    f"📦 **پلن:** {plan_data['name']}\n"
+                    f"👤 **اسم:** {name}\n"
+                    f"⏰ **اعتبار:** {plan_data.get('days', 30)} روز\n"
+                    f"📊 **حجم:** {plan_data.get('limit_gb', 0)} گیگ\n"
+                    f"🔗 **اتصالات همزمان:** ۱\n\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                )
+                await context.bot.send_message(
+                    chat_id=int(uid), text=header, parse_mode="Markdown"
+                )
+                for i, cfg in enumerate(all_configs, 1):
+                    label = "Reality+XHTTP" if "reality" in cfg else ("VLESS+WS" if "type=ws" in cfg else "XHTTP")
+                    await context.bot.send_message(
+                        chat_id=int(uid),
+                        text=f"**{i}. {label}:**\n`{cfg}`",
+                        parse_mode="Markdown"
+                    )
                 await context.bot.send_message(
                     chat_id=int(uid),
-                    text=(
-                        f"✅ **کانفیگ شما آماده است!**\n\n"
-                        f"📦 **پلن:** {plan_data['name']}\n"
-                        f"👤 **اسم:** {name}\n"
-                        f"⏰ **اعتبار:** {plan_data.get('days', 30)} روز\n"
-                        f"📊 **حجم:** {plan_data.get('limit_gb', 0)} گیگ\n"
-                        f"🔗 **اتصالات همزمان:** ۱\n\n"
-                        f"━━━━━━━━━━━━━━━━━\n\n"
-                        f"🔗 **لینک کانفیگ:**\n`{config_link}`\n\n"
-                        f"━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏"
-                    ),
+                    text="━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏",
                     reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
                 )
                 # Notify admin
@@ -933,12 +960,12 @@ async def handle_text(update, context):
                         f"👤 **کاربر:** {uid}\n"
                         f"📝 **اسم:** {name}\n"
                         f"📦 **پلن:** {plan_data['name']}\n"
-                        f"💰 **نوع پرداخت:** کیف پول\n\n"
-                        f"🔗 `{config_link}`"
+                        f"💰 **نوع پرداخت:** کیف پول\n"
+                        f"🔗 **تعداد کانفیگ:** {len(all_configs)}"
                     ),
                     parse_mode="Markdown"
                 )
-                logger.info(f"Auto config created for {uid}: {name}")
+                logger.info(f"Auto configs created for {uid}: {name} ({len(all_configs)} configs)")
             else:
                 # SpiderPanel failed
                 kb = [[InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")]]
@@ -990,22 +1017,34 @@ async def handle_text(update, context):
                 days=plan_data.get("days", 30),
             )
 
-            if user_data and user_data.get("config"):
-                config_link = user_data["config"]
+            if user_data and user_data.get("subscription_uuid"):
+                sub_uuid = user_data["subscription_uuid"]
+                all_configs = await spider.get_user_all_configs(sub_uuid)
+                if not all_configs and user_data.get("config"):
+                    all_configs = [user_data["config"]]
                 kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
+                header = (
+                    f"✅ **کانفیگ شما آماده است!**\n\n"
+                    f"📦 **پلن:** {plan_data['name']}\n"
+                    f"👤 **اسم:** {name}\n"
+                    f"⏰ **اعتبار:** {plan_data.get('days', 30)} روز\n"
+                    f"📊 **حجم:** {plan_data.get('limit_gb', 0)} گیگ\n"
+                    f"🔗 **اتصالات همزمان:** ۱\n\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                )
+                await context.bot.send_message(
+                    chat_id=int(uid), text=header, parse_mode="Markdown"
+                )
+                for i, cfg in enumerate(all_configs, 1):
+                    label = "Reality+XHTTP" if "reality" in cfg else ("VLESS+WS" if "type=ws" in cfg else "XHTTP")
+                    await context.bot.send_message(
+                        chat_id=int(uid),
+                        text=f"**{i}. {label}:**\n`{cfg}`",
+                        parse_mode="Markdown"
+                    )
                 await context.bot.send_message(
                     chat_id=int(uid),
-                    text=(
-                        f"✅ **کانفیگ شما آماده است!**\n\n"
-                        f"📦 **پلن:** {plan_data['name']}\n"
-                        f"👤 **اسم:** {name}\n"
-                        f"⏰ **اعتبار:** {plan_data.get('days', 30)} روز\n"
-                        f"📊 **حجم:** {plan_data.get('limit_gb', 0)} گیگ\n"
-                        f"🔗 **اتصالات همزمان:** ۱\n\n"
-                        f"━━━━━━━━━━━━━━━━━\n\n"
-                        f"🔗 **لینک کانفیگ:**\n`{config_link}`\n\n"
-                        f"━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏"
-                    ),
+                    text="━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏",
                     reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
                 )
                 await context.bot.send_message(
@@ -1015,12 +1054,12 @@ async def handle_text(update, context):
                         f"👤 **کاربر:** {uid}\n"
                         f"📝 **اسم:** {name}\n"
                         f"📦 **پلن:** {plan_data['name']}\n"
-                        f"💰 **نوع پرداخت:** رسید\n\n"
-                        f"🔗 `{config_link}`"
+                        f"💰 **نوع پرداخت:** رسید\n"
+                        f"🔗 **تعداد کانفیگ:** {len(all_configs)}"
                     ),
                     parse_mode="Markdown"
                 )
-                logger.info(f"Auto config created (receipt) for {uid}: {name}")
+                logger.info(f"Auto configs created (receipt) for {uid}: {name} ({len(all_configs)} configs)")
             else:
                 kb = [[InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")]]
                 await context.bot.send_message(
