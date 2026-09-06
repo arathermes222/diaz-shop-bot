@@ -102,11 +102,21 @@ class SpiderPanel:
         r = await self._retry_request("post", f"{self.base_url}/api/users", json=body)
         if r.status_code == 200:
             data = r.json()
-            logger.info(f"SpiderPanel user created: {data.get('username')} ({data.get('user_id')})")
+            user_id = data.get("user_id", "")
+            logger.info(f"SpiderPanel user created: {data.get('username')} ({user_id})")
+            # Config is not included in create response — fetch it separately
+            config = data.get("config", "")
+            if not config and user_id:
+                try:
+                    cr = await self._retry_request("get", f"{self.base_url}/api/users/{user_id}/config")
+                    if cr.status_code == 200:
+                        config = cr.json().get("config", "")
+                except Exception as e:
+                    logger.error(f"Failed to fetch config for {user_id}: {e}")
             return {
-                "user_id": data.get("user_id"),
+                "user_id": user_id,
                 "username": data.get("username"),
-                "config": data.get("config", ""),
+                "config": config,
                 "config_uuid": data.get("config_uuid", ""),
                 "subscription_url": data.get("subscription_url", ""),
                 "traffic_limit_bytes": data.get("traffic_limit_bytes", 0),
