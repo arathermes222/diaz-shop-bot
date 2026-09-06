@@ -927,6 +927,8 @@ async def handle_text(update, context):
                 sub_uuid = user_data["subscription_uuid"]
                 # Get ALL configs from subscription endpoint
                 all_configs = await spider.get_user_all_configs(sub_uuid)
+                # Only keep Reality configs (Worker-based, the only ones that work)
+                all_configs = [c for c in all_configs if "reality" in c.lower()]
                 if not all_configs and user_data.get("config"):
                     all_configs = [user_data["config"]]
                 # Send configs to user
@@ -1023,6 +1025,8 @@ async def handle_text(update, context):
             if user_data and user_data.get("subscription_uuid"):
                 sub_uuid = user_data["subscription_uuid"]
                 all_configs = await spider.get_user_all_configs(sub_uuid)
+                # Only keep Reality configs (Worker-based, the only ones that work)
+                all_configs = [c for c in all_configs if "reality" in c.lower()]
                 if not all_configs and user_data.get("config"):
                     all_configs = [user_data["config"]]
                 kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
