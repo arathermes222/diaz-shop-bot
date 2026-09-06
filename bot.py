@@ -90,7 +90,8 @@ class SpiderPanel:
         return r
 
     async def create_user(self, username, limit_gb=0, days=30):
-        """Create a SpiderPanel USER and return config details"""
+        """Create a SpiderPanel USER and return config details. Auto-retries with suffix on 409."""
+        import secrets as _secrets
         body = {
             "username": username,
             "traffic_limit_gb": limit_gb,
@@ -100,6 +101,12 @@ class SpiderPanel:
             "inbound_ids": ["default-reality", "default"],
         }
         r = await self._retry_request("post", f"{self.base_url}/api/users", json=body)
+        # If 409 (username exists), retry with random suffix
+        if r.status_code == 409:
+            suffix = _secrets.token_hex(2)
+            body["username"] = f"{username}-{suffix}"
+            logger.info(f"Username exists, retrying with: {body['username']}")
+            r = await self._retry_request("post", f"{self.base_url}/api/users", json=body)
         if r.status_code == 200:
             data = r.json()
             user_id = data.get("user_id", "")
