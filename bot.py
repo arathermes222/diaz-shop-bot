@@ -21,7 +21,7 @@ WALLET_FILE = "wallet.json"
 
 # SpiderPanel settings
 SPIDER_URL = os.environ.get("SPIDER_URL", "https://spiderpanel-production-2268.up.railway.app")
-SPIDER_PASSWORD = os.environ.get("SPIDER_PASSWORD", "Arat")
+SPIDER_PASSWORD = os.environ.get("SPIDER_PASSWORD", "admin")
 
 CONFIG_PLANS = {
     "10gb": {"name": "۱۰ گیگ", "price": "۱۲,۰۰۰", "data": "10GB", "duration": "۱ ماه", "price_int": 12000, "limit_gb": 10, "days": 30},
@@ -54,24 +54,27 @@ class SpiderPanel:
             await self.login()
 
     async def login(self):
-        try:
-            r = await self.client.post(f"{self.base_url}/api/login", json={"password": self.password})
-            if r.status_code == 200:
-                for cookie in r.cookies.jar:
-                    if cookie.name == "spider_session":
-                        self.session_token = cookie.value
-                        logger.info("SpiderPanel login OK")
+        for pw in [self.password, "admin"]:
+            try:
+                r = await self.client.post(f"{self.base_url}/api/login", json={"password": pw})
+                if r.status_code == 200:
+                    for cookie in r.cookies.jar:
+                        if cookie.name == "spider_session":
+                            self.session_token = cookie.value
+                            if pw != self.password:
+                                logger.info(f"SpiderPanel login OK with fallback password '{pw}'")
+                            else:
+                                logger.info("SpiderPanel login OK")
+                            return True
+                    cookies = dict(r.cookies)
+                    if cookies:
+                        self.session_token = list(cookies.values())[0]
+                        logger.info(f"SpiderPanel login OK (cookie: {list(cookies.keys())[0]})")
                         return True
-                cookies = dict(r.cookies)
-                if cookies:
-                    self.session_token = list(cookies.values())[0]
-                    logger.info(f"SpiderPanel login OK (cookie: {list(cookies.keys())[0]})")
-                    return True
-            logger.error(f"SpiderPanel login failed: {r.status_code}")
-            return False
-        except Exception as e:
-            logger.error(f"SpiderPanel login error: {e}")
-            return False
+            except Exception as e:
+                logger.error(f"SpiderPanel login error ({pw}): {e}")
+        logger.error("SpiderPanel login failed with all passwords")
+        return False
 
     def _cookies(self):
         if self.session_token:
