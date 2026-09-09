@@ -18,6 +18,7 @@ CARD_NUMBER = "6219861825198608"
 CARD_NAME = "امیرمحمد زارعی"
 PENDING_FILE = "pending_state.json"
 WALLET_FILE = "wallet.json"
+CONFIGS_FILE = "user_configs.json"
 
 # SpiderPanel settings
 SPIDER_URL = os.environ.get("SPIDER_URL", "https://spiderpanel-production-2268.up.railway.app")
@@ -189,6 +190,8 @@ def _save(filename, data):
 
 def load_pending(): return _load(PENDING_FILE)
 def save_pending(d): _save(PENDING_FILE, d)
+def load_configs(): return _load(CONFIGS_FILE)
+def save_configs(d): _save(CONFIGS_FILE, d)
 def load_wallet(): return _load(WALLET_FILE)
 def save_wallet(d): _save(WALLET_FILE, d)
 
@@ -243,7 +246,6 @@ WELCOME_TEXT = (
 
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 خرید کانفیگ", callback_data="buy_config")],
         [InlineKeyboardButton("🔐 خرید ExpressVPN", callback_data="buy_express")],
         [InlineKeyboardButton("💰 کیف پول", callback_data="wallet_menu")],
         [InlineKeyboardButton("👤 پنل کاربری", callback_data="user_panel")],
@@ -593,76 +595,30 @@ async def user_panel(update, context):
     uid = str(q.from_user.id)
     bal = get_balance(int(uid))
 
-    # Get user's configs from SpiderPanel
-    spider_users = []
-    try:
-        all_users = await spider.get_users()
-        for u in all_users:
-            uname = u.get("username", "")
-            if uname.startswith("diaz-"):
-                spider_users.append(u)
-    except Exception as e:
-        logger.error(f"Failed to get SpiderPanel users: {e}")
+    # Get user's ExpressVPN subscriptions (stored locally)
+    configs = load_configs()
+    user_configs = configs.get(uid, [])
 
-    if not spider_users:
+    if not user_configs:
         text = (
             f"👤 **پنل کاربری:**\n\n"
             f"💰 **کیف پول:** {bal:,} تومان\n\n"
-            f"📦 شما هنوز هیچ کانفیگی ندارید.\n"
+            f"📦 شما هنوز هیچ اشتراکی ندارید.\n"
             f"━━━━━━━━━━━━━━━━━"
         )
     else:
         text = f"👤 **پنل کاربری:**\n\n💰 **کیف پول:** {bal:,} تومان\n\n"
-
-        for i, u in enumerate(spider_users, 1):
-            uname = u.get("username", "")
-            user_id = u.get("user_id", "")
-            used = u.get("traffic_used_bytes", 0)
-            limit = u.get("traffic_limit_bytes", 0)
-            expire_at = u.get("expire_at", "")
-
-            # Format volume
-            if limit > 0:
-                usage = f"{_bytes_to_human(used)} / {_bytes_to_human(limit)}"
-            else:
-                usage = "∞"
-
-            # Format expiry
-            if expire_at:
-                try:
-                    from datetime import datetime
-                    exp = datetime.fromisoformat(expire_at)
-                    days_left = (exp - datetime.now()).days
-                    if days_left <= 0:
-                        expiry = "⏰ منقضی شده"
-                    else:
-                        expiry = f"{days_left} روز باقی‌مانده"
-                except:
-                    expiry = expire_at[:10]
-            else:
-                expiry = "∞"
-
-            # Get config link
-            config = ""
-            try:
-                cr = await spider.get_user_config(user_id)
-                config = cr if isinstance(cr, str) else ""
-            except:
-                pass
-
-            text += f"**{i}.** `{uname}`\n"
-            text += f"   📊 **حجم:** {usage}\n"
-            text += f"   ⏰ **اعتبار:** {expiry}\n"
-            if config:
-                text += f"   🔗 **کانفیگ:**\n`{config}`\n\n"
+        for i, cfg in enumerate(user_configs, 1):
+            text += f"**{i}.** {cfg.get('type', 'ExpressVPN')} - {cfg.get('data', '')}\n"
+            link = cfg.get("link", "")
+            if link:
+                text += f"   🔗 `{link}`\n\n"
             else:
                 text += "\n"
-
         text += "━━━━━━━━━━━━━━━━━"
 
     kb = [
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="user_panel")],
-        [InlineKeyboardButton("📦 خرید کانفیگ", callback_data="buy_config")],
         [InlineKeyboardButton("🔐 خرید ExpressVPN", callback_data="buy_express")],
         [InlineKeyboardButton("💰 کیف پول", callback_data="wallet_menu")],
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -852,10 +808,23 @@ async def handle_admin_text(update, context):
     user_id = pending["user_id"]
     plan_name = pending["plan_name"]
 
+    # Save to user's configs
+    configs = load_configs()
+    uid_str = str(user_id)
+    if uid_str not in configs:
+        configs[uid_str] = []
+    configs[uid_str].append({
+        "type": "ExpressVPN",
+        "data": plan_name,
+        "link": config_link,
+        "date": time.strftime("%Y-%m-%d"),
+    })
+    save_configs(configs)
+
     kb = [[InlineKeyboardButton("🏠 بازگشت به صفحه اصلی", callback_data="back_main")]]
     await context.bot.send_message(
         chat_id=user_id,
-        text=f"✅ **پرداخت شما تایید شد!**\n\n📦 **پلن:** {plan_name}\n🔗 **لینک کانفیگ:**\n`{config_link}`\n\n━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏",
+        text=f"✅ **پرداخت شما تایید شد!**\n\n📦 **پلن:** {plan_name}\n🔗 **لینک اشتراک:**\n`{config_link}`\n\n━━━━━━━━━━━━━━━━━\nاز خرید شما متشکریم! 🙏",
         reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
     )
     await update.message.reply_text(f"✅ **اشتراک با موفقیت ارسال شد!**\n\n👤 کاربر: {user_id}\n📦 پلن: {plan_name}")
