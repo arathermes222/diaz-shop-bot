@@ -19,6 +19,8 @@ CARD_NAME = "امیرمحمد زارعی"
 PENDING_FILE = "pending_state.json"
 WALLET_FILE = "wallet.json"
 CONFIGS_FILE = "user_configs.json"
+REFERRALS_FILE = "referrals.json"
+ACCOUNTS_FILE = "express_accounts.json"
 
 # SpiderPanel settings
 SPIDER_URL = os.environ.get("SPIDER_URL", "https://spiderpanel-production-2268.up.railway.app")
@@ -194,6 +196,47 @@ def load_configs(): return _load(CONFIGS_FILE)
 def save_configs(d): _save(CONFIGS_FILE, d)
 def load_wallet(): return _load(WALLET_FILE)
 def save_wallet(d): _save(WALLET_FILE, d)
+def load_referrals(): return _load(REFERRALS_FILE)
+def save_referrals(d): _save(REFERRALS_FILE, d)
+def load_accounts(): return _load(ACCOUNTS_FILE) if os.path.exists(ACCOUNTS_FILE) else []
+def save_accounts(d): _save(ACCOUNTS_FILE, d)
+
+REFERRAL_TARGET = 3
+
+def get_referral_count(inviter_id):
+    refs = load_referrals()
+    return len(refs.get(str(inviter_id), {}).get("invited", []))
+
+def add_referral(inviter_id, invited_id):
+    refs = load_referrals()
+    uid = str(inviter_id)
+    if uid not in refs:
+        refs[uid] = {"invited": [], "free_given": False}
+    if invited_id not in refs[uid]["invited"]:
+        refs[uid]["invited"].append(invited_id)
+        save_referrals(refs)
+        return True
+    return False
+
+def has_free_sub(uid):
+    refs = load_referrals()
+    return refs.get(str(uid), {}).get("free_given", False)
+
+def mark_free_given(uid):
+    refs = load_referrals()
+    uid_str = str(uid)
+    if uid_str in refs:
+        refs[uid_str]["free_given"] = True
+        save_referrals(refs)
+
+def get_next_account():
+    accounts = load_accounts()
+    for acc in accounts:
+        if acc.get("used_count", 0) < acc.get("max_uses", 3):
+            acc["used_count"] = acc.get("used_count", 0) + 1
+            save_accounts(accounts)
+            return acc
+    return None
 
 def get_balance(user_id):
     wallet = load_wallet()
@@ -248,6 +291,7 @@ def main_menu_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔐 خرید ExpressVPN", callback_data="buy_express")],
         [InlineKeyboardButton("💰 کیف پول", callback_data="wallet_menu")],
+        [InlineKeyboardButton("🎁 اشتراک رایگان", callback_data="free_sub")],
         [InlineKeyboardButton("👤 پنل کاربری", callback_data="user_panel")],
         [InlineKeyboardButton("💬 پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}")],
     ])
@@ -256,6 +300,32 @@ def main_menu_kb():
 
 async def start(update, context):
     user = update.effective_user
+    logger.info(f"START from {user.id} ({user.first_name}), args={context.args}")
+
+    # Track referral directly
+    if context.args:
+        payload = context.args[0]
+        if payload.startswith("ref"):
+            try:
+                inviter_id = int(payload[3:])
+                if inviter_id != user.id:
+                    added = add_referral(inviter_id, user.id)
+                    count = get_referral_count(inviter_id)
+                    logger.info(f"REFERRAL: user={user.id} by {inviter_id}, added={added}, total={count}")
+                    if added and count >= REFERRAL_TARGET and not has_free_sub(inviter_id):
+                        mark_free_given(inviter_id)
+                        kb = [[InlineKeyboardButton("🎁 اشتراک رایگان", callback_data="claim_free_sub")]]
+                        try:
+                            await context.bot.send_message(
+                                chat_id=inviter_id,
+                                text="🎉 <b>تبریک!</b>\n\nشما ۳ نفر رو دعوت کردید و اشتراک رایگان دریافت کردید!\n\nروی دکمه زیر کلیک کنید 👇",
+                                reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML"
+                            )
+                        except Exception as e:
+                            logger.error(f"Notify inviter failed: {e}")
+            except (ValueError, IndexError) as e:
+                logger.error(f"Ref parse error: {e}")
+
     if not await is_member(CHANNEL_ID, user.id, context):
         kb = [
             [InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{CHANNEL_ID.lstrip('@')}")],
@@ -285,6 +355,68 @@ async def back_main(update, context):
     q = update.callback_query
     await q.answer()
     await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+
+# ─── Free Subscription (Referral) ─────────────────────────
+
+async def free_sub_menu(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    count = get_referral_count(uid)
+    free_done = has_free_sub(uid)
+    username = context.bot.username
+
+    if free_done:
+        text = "🎁 <b>اشتراک رایگان</b>\n\nشما قبلاً اشتراک رایگان خود را دریافت کرده‌اید! ✅\n\n━━━━━━━━━━━━━━━━━"
+    elif count >= REFERRAL_TARGET:
+        text = f"🎉 <b>تبریک!</b>\n\nشما {count} نفر را دعوت کرده‌اید!\n\nروی «دریافت اشتراک» کلیک کنید 👇\n\n━━━━━━━━━━━━━━━━━"
+    else:
+        remaining = REFERRAL_TARGET - count
+        text = (
+            f"🎁 <b>اشتراک رایگان</b>\n\n"
+            f"با دعوت {REFERRAL_TARGET} نفر به ربات، اشتراک رایگان بگیرید!\n\n"
+            f"📊 <b>وضعیت شما:</b>\n"
+            f"   تعداد دعوت‌شده: <b>{count}/{REFERRAL_TARGET}</b>\n"
+            f"   باقی‌مانده: <b>{remaining} نفر</b>\n\n"
+            f"🔗 لینک دعوت اختصاصی شما:\n"
+            f"<code>https://t.me/{username}?start=ref{uid}</code>\n\n"
+            f"این لینک رو با دوستات به اشتراک بذارید!\n\n"
+            f"━━━━━━━━━━━━━━━━━"
+        )
+
+    kb = []
+    if count >= REFERRAL_TARGET and not free_done:
+        kb.append([InlineKeyboardButton("🎁 دریافت اشتراک رایگان", callback_data="claim_free_sub")])
+    kb.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")])
+    await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
+
+
+async def claim_free_sub(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    count = get_referral_count(uid)
+
+    if count < REFERRAL_TARGET:
+        await q.edit_message_text(f"❌ هنوز {REFERRAL_TARGET - count} نفر دیگه لازم دارید.")
+        return
+
+    account = get_next_account()
+    if not account:
+        await q.edit_message_text("❌ اشتراک رایگان تمام شده! با پشتیبانی تماس بگیرید.")
+        return
+
+    kb = [[InlineKeyboardButton("🏠 بازگشت", callback_data="back_main")]]
+    await q.edit_message_text(
+        f"🎉 <b>اشتراک رایگان شما فعال شد!</b>\n\n"
+        f"📧 <b>ایمیل:</b> <code>{account['email']}</code>\n"
+        f"🔑 <b>پسورد:</b> <code>{account['password']}</code>\n\n"
+        f"⏰ <b>اعتبار:</b> {account['days_left']} روز\n\n"
+        "━━━━━━━━━━━━━━━━━\nموفق باشید! 🙏",
+        reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML"
+    )
+    mark_free_given(uid)
+    logger.info(f"FREE SUB claimed by {uid}, account={account['email']}")
 
 # ─── Wallet ───────────────────────────────────────────────
 
@@ -1093,6 +1225,11 @@ def main():
     app.add_handler(CallbackQueryHandler(pay_express, pattern="^pay_express_"))
     app.add_handler(CallbackQueryHandler(pay_wallet_express, pattern="^pay_wallet_express_"))
     app.add_handler(CallbackQueryHandler(receipt_express_received, pattern="^receipt_express_"))
+
+    # Wallet
+    # Free subscription
+    app.add_handler(CallbackQueryHandler(free_sub_menu, pattern="^free_sub$"))
+    app.add_handler(CallbackQueryHandler(claim_free_sub, pattern="^claim_free_sub$"))
 
     # Wallet
     app.add_handler(CallbackQueryHandler(wallet_menu, pattern="^wallet_menu$"))
